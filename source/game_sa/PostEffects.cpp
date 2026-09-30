@@ -51,7 +51,7 @@ void CPostEffects::InjectHooks() {
     RH_ScopedInstall(Fog, 0x704150);
     RH_ScopedInstall(CCTV, 0x702F40);
     RH_ScopedInstall(Grain, 0x7037C0);
-    RH_ScopedInstall(SpeedFX, 0x7030A0, { .reversed = false });
+    RH_ScopedInstall(SpeedFX, 0x7030A0);
     RH_ScopedInstall(DarknessFilter, 0x702F00);
     RH_ScopedInstall(ColourFilter, 0x703650);
     RH_ScopedInstall(Radiosity, 0x702080, { .reversed = false });
@@ -841,7 +841,99 @@ void CPostEffects::Grain(int32 strengthMask, bool update) {
 
 // 0x7030A0
 void CPostEffects::SpeedFX(float speed) {
-    plugin::Call<0x7030A0, float>(speed);
+    struct SpeedFXSetting {
+        float Speed;
+        int32 Passes;
+        int32 Blur;
+        int32 Shake;
+    };
+    constexpr SpeedFXSetting SPEED_FX_TABLE[]{ // 0x8D5190
+        { 0.60f, 1, 4, 0 },
+        { 0.70f, 2, 4, 0 },
+        { 0.80f, 3, 4, 0 },
+        { 0.90f, 3, 4, 0 },
+        { 0.93f, 4, 4, 1 },
+        { 0.96f, 4, 4, 2 },
+        { 1.00f, 5, 4, 3 },
+    };
+
+    const auto lookDir          = TheCamera.GetActiveCam().m_nDirectionWasLooking;
+    const auto isLookingBehind  = lookDir == LOOKING_DIRECTION_BEHIND;
+    const auto isLookingUnknown = lookDir == LOOKING_DIRECTION_UNKNOWN_3;
+
+    // 0x7030F0
+    SpeedFXSetting setting{};
+    for (const auto& s : SPEED_FX_TABLE | rngv::reverse) {
+        if (speed >= s.Speed) {
+            setting = s;
+            break;
+        }
+    }
+
+    // 0x703128
+    if (isLookingBehind || isLookingUnknown) {
+        setting.Blur /= 2;
+        setting.Shake = 0;
+    }
+
+    if (setting.Passes <= 0) {
+        return;
+    }
+
+    ImmediateModeRenderStatesStore();
+    ImmediateModeRenderStatesSet();
+
+    // 0x70317C
+    float shakeU{}, shakeV{};
+    if (setting.Shake > 0) {
+        const auto shake     = (float)setting.Shake * 0.004f;
+        const auto maxShakeU = ms_imf.fFrontBufferU2 * shake;
+        const auto maxShakeV = ms_imf.fFrontBufferV2 * shake;
+        shakeU = (float)CGeneral::GetRandomNumber() * RAND_MAX_FLOAT_RECIPROCAL * maxShakeU;
+        shakeV = (float)CGeneral::GetRandomNumber() * RAND_MAX_FLOAT_RECIPROCAL * maxShakeV;
+    }
+
+    // 0x7031E6
+    const auto blur = (float)setting.Blur;
+    const auto du   = ms_imf.fFrontBufferU2 * blur * 0.0025f;
+    const auto dv   = blur * ms_imf.fFrontBufferV2 * 0.0025f;
+
+    float u0 = du, u1 = -du, u2 = du, u3 = -du;
+    float v0 = dv, v1 = dv, v2 = -dv, v3 = -dv;
+    for (auto i = 0; i < setting.Passes; i++) {
+        // 0x703250
+        if (isLookingBehind) {
+            u1 = u3 = 0.0f;
+            v0 = v1 = v2 = v3 = 0.0f;
+        }
+        if (isLookingUnknown) {
+            u0 = u2 = 0.0f;
+            v0 = v1 = v2 = v3 = 0.0f;
+        }
+
+        // 0x7032FC
+        DrawQuadSetUVs(
+            ms_imf.fFrontBufferU1 + u0 + shakeU, ms_imf.fFrontBufferV1 + v0 + shakeV,
+            ms_imf.fFrontBufferU2 + u1 - shakeU, ms_imf.fFrontBufferV1 + v1 + shakeV,
+            ms_imf.fFrontBufferU1 + u2 + shakeU, ms_imf.fFrontBufferV2 + v2 - shakeU, // `shakeU` is what the original uses (0x703382)
+            ms_imf.fFrontBufferU2 + u3 - shakeU, ms_imf.fFrontBufferV2 + v3 - shakeV
+        );
+        DrawQuad(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 255, 255, 255, m_SpeedFXAlpha, pRasterFrontBuffer);
+
+        // 0x7033DA
+        u0 += du;
+        v0 += dv;
+        u1 -= du;
+        v1 += dv;
+        u3 -= du;
+        v3 -= dv;
+        u2 += du;
+        v2 -= dv;
+    }
+
+    // 0x703446
+    DrawQuadSetUVs(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    ImmediateModeRenderStatesReStore();
 }
 
 // 0x702F00
