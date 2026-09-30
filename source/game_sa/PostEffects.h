@@ -112,6 +112,7 @@ public:
     static inline auto& m_bWaterDepthDarkness = StaticRef<bool>(0x8D5144);  // true;
 
     static inline auto& m_bHeatHazeFX = StaticRef<bool>(0xC402BA);
+    static inline auto& m_bHeatHazeMaskModeTest = StaticRef<bool>(0xC402BB);
     static inline auto& m_HeatHazeFXSpeedMin = StaticRef<int32>(0x8D50EC); // 6
     static inline auto& m_HeatHazeFXSpeedMax = StaticRef<int32>(0x8D50F0); // 10
     static inline auto& m_HeatHazeFXIntensity = StaticRef<int32>(0x8D50E8); // 150

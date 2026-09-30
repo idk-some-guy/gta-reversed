@@ -39,7 +39,7 @@ void CPostEffects::InjectHooks() {
     RH_ScopedInstall(ScriptResetForEffects, 0x7010F0);
     RH_ScopedInstall(UnderWaterRipple, 0x7039C0);
     RH_ScopedInstall(HeatHazeFXInit, 0x701450);
-    RH_ScopedInstall(HeatHazeFX, 0x701780, { .reversed = false });
+    RH_ScopedInstall(HeatHazeFX, 0x701780);
     RH_ScopedInstall(IsVisionFXActive, 0x7034F0);
     RH_ScopedInstall(NightVision, 0x7011C0);
     RH_ScopedInstall(NightVisionSetLights, 0x7012E0);
@@ -540,7 +540,185 @@ void CPostEffects::HeatHazeFXInit() {
 
 // 0x701780
 void CPostEffects::HeatHazeFX(float fIntensity, bool bAlphaMaskMode) {
-    plugin::Call<0x701780, float, bool>(fIntensity, bAlphaMaskMode);
+    const auto hasStencil = RwRasterGetDepth(RwCameraGetRaster(Scene.m_pRwCamera)) != 16;
+
+    if (bAlphaMaskMode) {
+        RwRGBA clearColor{ 0, 0, 0, 0 };
+        RwCameraClear(Scene.m_pRwCamera, &clearColor, rwCAMERACLEARZ);
+        ImmediateModeRenderStatesStore();
+        ImmediateModeRenderStatesSet();
+        RwRenderStateSet(rwRENDERSTATESRCBLEND,  RWRSTATE(rwBLENDSRCALPHA));
+        RwRenderStateSet(rwRENDERSTATEDESTBLEND, RWRSTATE(rwBLENDONE));
+        if (hasStencil) {
+            RwRenderStateSet(rwRENDERSTATESTENCILENABLE,      RWRSTATE(TRUE));
+            RwRenderStateSet(rwRENDERSTATESTENCILFAIL,        RWRSTATE(rwSTENCILOPERATIONKEEP));
+            RwRenderStateSet(rwRENDERSTATESTENCILZFAIL,       RWRSTATE(rwSTENCILOPERATIONKEEP));
+            RwRenderStateSet(rwRENDERSTATESTENCILPASS,        RWRSTATE(rwSTENCILOPERATIONREPLACE));
+            RwRenderStateSet(rwRENDERSTATESTENCILFUNCTIONREF, RWRSTATE(0));
+            RwRenderStateSet(rwRENDERSTATESTENCILFUNCTION,    RWRSTATE(rwSTENCILFUNCTIONALWAYS));
+        }
+        DrawQuad(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 255, nullptr);
+        if (hasStencil) {
+            RwRenderStateSet(rwRENDERSTATESTENCILFUNCTIONREF, RWRSTATE(1));
+        }
+        g_fx.Render(TheCamera.m_pRwCamera, true);
+        ImmediateModeRenderStatesReStore();
+    } else {
+        m_bHeatHazeMaskModeTest = false;
+    }
+
+    // 0x7018B1
+    fIntensity = std::clamp(fIntensity, 0.0f, 1.0f);
+    HeatHazeFXInit();
+
+    RwRenderStateSet(rwRENDERSTATETEXTUREADDRESS, RWRSTATE(rwTEXTUREADDRESSCLAMP));
+    RwCameraEndUpdate(Scene.m_pRwCamera);
+    RwRasterPushContext(pRasterFrontBuffer);
+    RwRasterRenderFast(RwCameraGetRaster(Scene.m_pRwCamera), 0, 0);
+    RwRasterPopContext();
+    RsCameraBeginUpdate(Scene.m_pRwCamera);
+
+    uiTempBufferVerticesStored = 0;
+    uiTempBufferIndicesStored = 0;
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE,         RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, RWRSTATE(TRUE));
+
+    const auto alpha = (uint8)(int32)((float)m_HeatHazeFXIntensity * fIntensity);
+
+    if (hasStencil) {
+        RwRenderStateSet(rwRENDERSTATESTENCILPASS,        RWRSTATE(rwSTENCILOPERATIONKEEP));
+        RwRenderStateSet(rwRENDERSTATESTENCILFUNCTIONREF, RWRSTATE(1));
+        RwRenderStateSet(rwRENDERSTATESTENCILFUNCTION,    RWRSTATE(rwSTENCILFUNCTIONEQUAL));
+    }
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE,   RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE,  RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, pRasterFrontBuffer);
+    RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, RWRSTATE(rwFILTERLINEAR));
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,      RWRSTATE(rwBLENDSRCALPHA));
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND,     RWRSTATE(rwBLENDINVSRCALPHA));
+
+    const auto recipNearClip = 1.0f / RwCameraGetNearClipPlane(Scene.m_pRwCamera);
+
+    const auto AddQuadIndices = [](uint16 vtx) {
+        auto* const indices = &aTempBufferIndices[uiTempBufferIndicesStored];
+        indices[0] = vtx + 0;
+        indices[1] = vtx + 2;
+        indices[2] = vtx + 1;
+        indices[3] = vtx + 1;
+        indices[4] = vtx + 2;
+        indices[5] = vtx + 3;
+        uiTempBufferVerticesStored += 4;
+        uiTempBufferIndicesStored += 6;
+    };
+
+    if (!m_bHeatHazeMaskModeTest) {
+        // 0x7019FD
+        const auto color   = CRGBA(255, 255, 255, alpha).ToIntARGB();
+        const auto offsetX = (m_HeatHazeFXRenderSizeX - m_HeatHazeFXScanSizeX) / 2;
+        const auto offsetY = (m_HeatHazeFXRenderSizeY - m_HeatHazeFXScanSizeY) / 2;
+
+        const auto SetVertex = [&](RwD3D9Vertex& vtx, int32 x, int32 y, int32 u, int32 v) {
+            vtx.x             = (float)x;
+            vtx.y             = (float)y;
+            vtx.z             = RwIm2DGetNearScreenZ();
+            vtx.rhw           = recipNearClip;
+            vtx.emissiveColor = color;
+            vtx.u             = (float)u / (float)RwRasterGetWidth(pRasterFrontBuffer);
+            vtx.v             = (float)v / (float)RwRasterGetHeight(pRasterFrontBuffer);
+        };
+
+        for (auto i = 0u; i < std::size(hpX); i++) {
+            auto scanX = hpX[i], scanY = hpY[i];
+            auto x = scanX - offsetX, y = scanY - offsetY;
+            if (m_HeatHazeFXRandomShift > 0) {
+                x += CGeneral::GetRandomNumberInRange(-m_HeatHazeFXRandomShift, m_HeatHazeFXRandomShift);
+                y += CGeneral::GetRandomNumberInRange(-m_HeatHazeFXRandomShift, m_HeatHazeFXRandomShift);
+            }
+
+            // 0x701B33
+            if (x < 0) {
+                scanX += offsetX;
+                x = 0;
+            }
+            if (x > RwRasterGetWidth(pRasterFrontBuffer) - m_HeatHazeFXRenderSizeX) {
+                x = RwRasterGetWidth(pRasterFrontBuffer) - m_HeatHazeFXRenderSizeX;
+                scanX -= offsetX;
+            }
+            if (y < 0) {
+                scanY += offsetY;
+                y = 0;
+            }
+            if (y > RwRasterGetHeight(pRasterFrontBuffer) - m_HeatHazeFXRenderSizeY) {
+                y = RwRasterGetHeight(pRasterFrontBuffer) - m_HeatHazeFXRenderSizeY;
+                scanY -= offsetY;
+            }
+
+            // 0x701BA7
+            auto* const vertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
+            SetVertex(vertices[0], x,                           y,                           scanX,                         scanY);
+            SetVertex(vertices[1], x + m_HeatHazeFXRenderSizeX, y,                           scanX + m_HeatHazeFXScanSizeX, scanY);
+            SetVertex(vertices[2], x,                           y + m_HeatHazeFXRenderSizeY, scanX,                         scanY + m_HeatHazeFXScanSizeY);
+            SetVertex(vertices[3], x + m_HeatHazeFXRenderSizeX, y + m_HeatHazeFXRenderSizeY, scanX + m_HeatHazeFXScanSizeX, scanY + m_HeatHazeFXScanSizeY);
+            AddQuadIndices(uiTempBufferVerticesStored);
+
+            // 0x701D61
+            hpY[i] -= (int32)(CTimer::GetTimeStep() * 0.5f * (float)hpS[i]);
+            if (hpY[i] < 0) {
+                hpX[i] = CGeneral::GetRandomNumberInRange(0, RwRasterGetWidth(pRasterFrontBuffer) - m_HeatHazeFXScanSizeX);
+                hpY[i] = RwRasterGetHeight(pRasterFrontBuffer) - m_HeatHazeFXScanSizeY;
+                hpS[i] = CGeneral::GetRandomNumberInRange(m_HeatHazeFXSpeedMin, m_HeatHazeFXSpeedMax);
+            }
+        }
+    } else {
+        // 0x701E84
+        const auto color  = CRGBA(255, 0, 0, alpha).ToIntARGB();
+        const auto width  = (float)RwRasterGetWidth(pRasterFrontBuffer);
+        const auto height = (float)RwRasterGetHeight(pRasterFrontBuffer);
+
+        // Original never sets the rhw of vertices 2 and 3, nor any UVs
+        auto* const vertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
+        vertices[0].x             = 0.0f;
+        vertices[0].y             = 0.0f;
+        vertices[0].z             = RwIm2DGetNearScreenZ();
+        vertices[0].rhw           = recipNearClip;
+        vertices[0].emissiveColor = color;
+
+        vertices[1].x             = width;
+        vertices[1].y             = 0.0f;
+        vertices[1].z             = RwIm2DGetNearScreenZ();
+        vertices[1].rhw           = recipNearClip;
+        vertices[1].emissiveColor = color;
+
+        vertices[2].x             = 0.0f;
+        vertices[2].y             = height;
+        vertices[2].z             = RwIm2DGetNearScreenZ();
+        vertices[2].emissiveColor = color;
+
+        vertices[3].x             = width;
+        vertices[3].y             = height;
+        vertices[3].z             = RwIm2DGetNearScreenZ();
+        vertices[3].emissiveColor = color;
+
+        AddQuadIndices(uiTempBufferVerticesStored);
+    }
+
+    // 0x701FBF
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, pRasterFrontBuffer);
+    if (uiTempBufferVerticesStored) {
+        RwIm2DRenderIndexedPrimitive(rwPRIMTYPETRILIST, aRadiosityVertexBuffer, uiTempBufferVerticesStored, aTempBufferIndices, uiTempBufferIndicesStored);
+    }
+    uiTempBufferVerticesStored = 0;
+
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE,         RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE,       RWRSTATE(TRUE));
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE,      RWRSTATE(TRUE));
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER,     RWRSTATE(NULL));
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,          RWRSTATE(rwBLENDSRCALPHA));
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND,         RWRSTATE(rwBLENDINVSRCALPHA));
+    if (hasStencil) {
+        RwRenderStateSet(rwRENDERSTATESTENCILENABLE, RWRSTATE(FALSE));
+    }
 }
 
 // 0x7034F0
