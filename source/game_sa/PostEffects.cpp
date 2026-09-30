@@ -531,9 +531,9 @@ void CPostEffects::HeatHazeFXInit() {
 
     m_HeatHazeFXTypeLast = m_HeatHazeFXType;
 
-    for (auto i = 0; i < 180; i++) {
-        hpX[i] = CGeneral::GetRandomNumberInRange(m_HeatHazeFXScanSizeX, RwRasterGetWidth(pRasterFrontBuffer));
-        hpY[i] = CGeneral::GetRandomNumberInRange(m_HeatHazeFXScanSizeY, RwRasterGetHeight(pRasterFrontBuffer));
+    for (auto i = 0u; i < std::size(hpX); i++) {
+        hpX[i] = CGeneral::GetRandomNumberInRange(0, RwRasterGetWidth(pRasterFrontBuffer) - m_HeatHazeFXScanSizeX);
+        hpY[i] = CGeneral::GetRandomNumberInRange(0, RwRasterGetHeight(pRasterFrontBuffer) - m_HeatHazeFXScanSizeY);
         hpS[i] = CGeneral::GetRandomNumberInRange(m_HeatHazeFXSpeedMin,  m_HeatHazeFXSpeedMax);
     }
 }

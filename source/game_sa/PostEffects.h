@@ -156,8 +156,8 @@ public:
     static inline auto& m_bRadiosityBypassTimeCycleIntensityLimit = StaticRef<bool>(0xC402CE);
     static inline auto& m_RadiosityPixelsX = StaticRef<int32>(0xC40314);  // RsGlobal.maximumWidth
     static inline auto& m_RadiosityPixelsY = StaticRef<int32>(0xC40318);  // RsGlobal.maximumHeight
-    static inline auto& m_RadiosityFilterPasses = StaticRef<uint32>(0x8D5110); // 1
-    static inline auto& m_RadiosityRenderPasses = StaticRef<uint32>(0x8D510C); // 2
+    static inline auto& m_RadiosityFilterPasses = StaticRef<uint32>(0x8D510C); // 2
+    static inline auto& m_RadiosityRenderPasses = StaticRef<uint32>(0x8D5110); // 1
 
     static inline auto& m_VisionFXDayNightBalance = StaticRef<float>(0x8D50A4); // 1.0f
 
