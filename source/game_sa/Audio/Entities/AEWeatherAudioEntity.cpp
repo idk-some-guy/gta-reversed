@@ -184,7 +184,7 @@ void CAEWeatherAudioEntity::UpdateParameters(CAESound* sound, int16 curPlayPos) 
         if (CAEAudioUtility::ResolveProbability(0.07f)) { // 0x506642
             sbWindOffset = !sbWindOffset;
         }
-        sbWindOffset = sbWindOffset // 0x50667E
+        sfWindOffset = sbWindOffset // 0x50667E
             ? 21.f * windRatio
             : 0.f;
         sfWindFreq = sbWindOffset // 0x50668E
@@ -202,8 +202,8 @@ void CAEWeatherAudioEntity::UpdateParameters(CAESound* sound, int16 curPlayPos) 
         }
         break;
     }
-    default:
-        NOTSA_UNREACHABLE();
+    default: // 0x505BE5
+        break;
     }
 }
 
