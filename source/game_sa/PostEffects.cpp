@@ -1,5 +1,7 @@
 #include "StdInc.h"
 
+#include <reversiblebugfixes/Bugs.hpp>
+
 #include "PostEffects.h"
 #include "CustomBuildingDNPipeline.h"
 #include "Clouds.h"
@@ -585,6 +587,7 @@ void CPostEffects::HeatHazeFX(float fIntensity, bool bAlphaMaskMode) {
 
     const auto alpha = (uint8)(int32)((float)m_HeatHazeFXIntensity * fIntensity);
 
+    // Original enables the stencil test only in `bAlphaMaskMode`, so without it these states do nothing
     if (hasStencil) {
         RwRenderStateSet(rwRENDERSTATESTENCILPASS,        RWRSTATE(rwSTENCILOPERATIONKEEP));
         RwRenderStateSet(rwRENDERSTATESTENCILFUNCTIONREF, RWRSTATE(1));
@@ -1093,7 +1096,7 @@ void CPostEffects::SpeedFX(float speed) {
         DrawQuadSetUVs(
             ms_imf.fFrontBufferU1 + u0 + shakeU, ms_imf.fFrontBufferV1 + v0 + shakeV,
             ms_imf.fFrontBufferU2 + u1 - shakeU, ms_imf.fFrontBufferV1 + v1 + shakeV,
-            ms_imf.fFrontBufferU1 + u2 + shakeU, ms_imf.fFrontBufferV2 + v2 - shakeU, // `shakeU` is what the original uses (0x703382)
+            ms_imf.fFrontBufferU1 + u2 + shakeU, ms_imf.fFrontBufferV2 + v2 - (notsa::bugfixes::CPostEffects_SpeedFX_ShakeAxis ? shakeV : shakeU),
             ms_imf.fFrontBufferU2 + u3 - shakeU, ms_imf.fFrontBufferV2 + v3 - shakeV
         );
         DrawQuad(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, 255, 255, 255, m_SpeedFXAlpha, pRasterFrontBuffer);
@@ -1220,6 +1223,7 @@ void CPostEffects::Radiosity(int32 intensityLimit, int32 filterPasses, int32 ren
     RwRenderStateSet(rwRENDERSTATESRCBLEND,  RWRSTATE(rwBLENDSRCALPHA));
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, RWRSTATE(rwBLENDINVSRCALPHA));
 
+    // Original never writes the UVs of this quad
     auto* const limitVertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
     limitVertices[0].x   = 0.0f;
     limitVertices[0].y   = 0.0f;

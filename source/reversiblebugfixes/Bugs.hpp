@@ -44,6 +44,11 @@ inline const ReversibleBugFix PS2CoronaRendering{
     .Description = "Fix corona rendering, so they're like on PS2",
     .Credit      = "SilentPatch Contributors"
 };
+inline const ReversibleBugFix CPostEffects_SpeedFX_ShakeAxis{
+    .Name        = "SpeedFX Shake Axis",
+    .Description = "The speed effect shook one corner of the screen vertically by the horizontal shake amount. The fix uses the vertical shake amount there.",
+    .Credit      = "idk-some-guy"
+};
 inline const ReversibleBugFix AnimBlendSequence_SetName_SetBoneTagFlag{
     .Name        = "BoneTag Name Flag",
     .Description = "Correctly set BoneTag flag in `CAnimBlendSequence::SetName`",
