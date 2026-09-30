@@ -54,7 +54,7 @@ void CPostEffects::InjectHooks() {
     RH_ScopedInstall(SpeedFX, 0x7030A0);
     RH_ScopedInstall(DarknessFilter, 0x702F00);
     RH_ScopedInstall(ColourFilter, 0x703650);
-    RH_ScopedInstall(Radiosity, 0x702080, { .reversed = false });
+    RH_ScopedInstall(Radiosity, 0x702080);
     RH_ScopedInstall(SetSpeedFXManualSpeedCurrentFrame, 0x700BE0);
     RH_ScopedInstall(Render, 0x7046E0);
 }
@@ -977,7 +977,133 @@ void CPostEffects::ColourFilter(RwRGBA pass1, RwRGBA pass2) {
 
 // 0x702080
 void CPostEffects::Radiosity(int32 intensityLimit, int32 filterPasses, int32 renderPasses, int32 intensity) {
-    plugin::Call<0x702080>();
+    auto width  = m_RadiosityPixelsX;
+    auto height = m_RadiosityPixelsY;
+
+    RwRenderStateSet(rwRENDERSTATETEXTUREFILTER,     RWRSTATE(rwFILTERNEAREST));
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE,         RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE,       RWRSTATE(TRUE));
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE,      RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER,     RWRSTATE(pRasterFrontBuffer));
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,          RWRSTATE(rwBLENDSRCALPHA));
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND,         RWRSTATE(rwBLENDINVSRCALPHA));
+
+    const auto recipNearClip = 1.0f / RwCameraGetNearClipPlane(Scene.m_pRwCamera);
+
+    // 0x702101
+    uiTempBufferVerticesStored = 0;
+    aRadiosityVertexBuffer[0].x   = 0.0f;
+    aRadiosityVertexBuffer[0].y   = 0.0f;
+    aRadiosityVertexBuffer[0].z   = 0.0f;
+    aRadiosityVertexBuffer[0].rhw = recipNearClip;
+    aRadiosityVertexBuffer[0].u   = 0.0f;
+    aRadiosityVertexBuffer[0].v   = 0.0f;
+    aRadiosityVertexBuffer[1].x   = m_bRadiosityStripCopyMode ? SCREEN_WIDTH : (float)width;
+    aRadiosityVertexBuffer[1].y   = m_bRadiosityStripCopyMode ? SCREEN_HEIGHT : (float)height;
+    aRadiosityVertexBuffer[1].z   = 0.0f;
+    aRadiosityVertexBuffer[1].rhw = recipNearClip;
+    aRadiosityVertexBuffer[1].u   = 1.0f;
+    aRadiosityVertexBuffer[1].v   = 1.0f;
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, RWRSTATE(TRUE));
+
+    // 0x7021B1
+    if (filterPasses > 0) {
+        RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, RWRSTATE(rwFILTERLINEAR));
+        for (auto i = 0; i < filterPasses; i++) {
+            const auto srcWidth = width, srcHeight = height;
+            width /= 2;
+            height /= 2;
+
+            auto* const vertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
+            vertices[0] = {
+                .x             = 0.0f,
+                .y             = 0.0f,
+                .z             = 0.0f,
+                .rhw           = recipNearClip,
+                .emissiveColor = 0xFFFFFFFF,
+                .u             = (float)m_RadiosityFilterUCorrection / (float)RwRasterGetWidth(pRasterFrontBuffer),
+                .v             = (float)m_RadiosityFilterVCorrection / (float)RwRasterGetHeight(pRasterFrontBuffer)
+            };
+            vertices[1] = {
+                .x             = (float)(width + 1),
+                .y             = (float)(height + 1),
+                .z             = 0.0f,
+                .rhw           = recipNearClip,
+                .emissiveColor = 0xFFFFFFFF,
+                .u             = (float)srcWidth / (float)RwRasterGetWidth(pRasterFrontBuffer),
+                .v             = (float)srcHeight / (float)RwRasterGetHeight(pRasterFrontBuffer)
+            };
+            uiTempBufferVerticesStored += 2;
+        }
+    }
+
+    // 0x702671
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,  RWRSTATE(rwBLENDSRCALPHA));
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, RWRSTATE(rwBLENDINVSRCALPHA));
+
+    auto* const limitVertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
+    limitVertices[0].x   = 0.0f;
+    limitVertices[0].y   = 0.0f;
+    limitVertices[0].z   = 0.0f;
+    limitVertices[0].rhw = recipNearClip;
+    limitVertices[1].x   = (float)(width + 1);
+    limitVertices[1].y   = (float)(height + 1);
+    limitVertices[1].z   = 0.0f;
+    limitVertices[1].rhw = recipNearClip;
+    RwIm2DVertexSetIntRGBA(&limitVertices[0], intensityLimit, intensityLimit, intensityLimit, 128);
+    RwIm2DVertexSetIntRGBA(&limitVertices[1], intensityLimit, intensityLimit, intensityLimit, 128);
+    uiTempBufferVerticesStored += 2;
+
+    // 0x70272D
+    if (renderPasses > 0) {
+        if (uiTempBufferVerticesStored > 2) {
+            RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, aRadiosityVertexBuffer, uiTempBufferVerticesStored);
+        }
+        uiTempBufferVerticesStored = 0;
+        RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, RWRSTATE(m_bRadiosityLinearFilter ? rwFILTERLINEAR : rwFILTERMIPNEAREST));
+
+        // 0x702771
+        const auto color = !m_bRadiosityStripCopyMode && m_bRadiosityDebug
+            ? 0xFFFFFFFF
+            : (uint32)intensity << 24;
+        for (auto i = 0; i < renderPasses; i++) {
+            auto* const vertices = &aRadiosityVertexBuffer[uiTempBufferVerticesStored];
+            vertices[0] = {
+                .x             = 0.0f,
+                .y             = 0.0f,
+                .z             = 0.0f,
+                .rhw           = recipNearClip,
+                .emissiveColor = color,
+                .u             = 0.0f,
+                .v             = 0.0f
+            };
+            vertices[1] = {
+                .x             = SCREEN_WIDTH,
+                .y             = SCREEN_HEIGHT,
+                .z             = 0.0f,
+                .rhw           = recipNearClip,
+                .emissiveColor = color,
+                .u             = (float)width / (float)RwRasterGetWidth(pRasterFrontBuffer),
+                .v             = (float)height / (float)RwRasterGetHeight(pRasterFrontBuffer)
+            };
+            uiTempBufferVerticesStored += 2;
+        }
+    }
+
+    // 0x702E79
+    if (uiTempBufferVerticesStored > 2) {
+        RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, aRadiosityVertexBuffer, uiTempBufferVerticesStored);
+    }
+    uiTempBufferVerticesStored = 0;
+
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE,         RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE,       RWRSTATE(TRUE));
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE,      RWRSTATE(TRUE));
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER,     RWRSTATE(NULL));
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, RWRSTATE(FALSE));
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,          RWRSTATE(rwBLENDSRCALPHA));
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND,         RWRSTATE(rwBLENDINVSRCALPHA));
 }
 
 // 0x700BE0
