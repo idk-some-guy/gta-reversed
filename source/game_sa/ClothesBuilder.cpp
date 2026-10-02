@@ -518,16 +518,9 @@ RpClump* CClothesBuilder::CreateSkinnedClump(RpClump* bones, RwTexDictionary* di
     }
 
     if (odscr) {
-        ms_geometryHasChanged = false;
-        ms_ratiosHaveChanged  = false;
-        if (odscr->m_fFatStat != ndscr.m_fFatStat || odscr->m_fMuscleStat != ndscr.m_fMuscleStat) {
-            ms_textureHasChanged = true;
-            ms_geometryHasChanged = true;
-        } else {
-            ms_textureHasChanged = true;
-        }
-        ms_geometryHasChanged = !rng::equal(ndscr.m_anModelKeys, odscr->m_anModelKeys);
-        ms_ratiosHaveChanged  = !rng::equal(ndscr.m_anTextureKeys, odscr->m_anTextureKeys);
+        ms_ratiosHaveChanged  = odscr->m_fFatStat != ndscr.m_fFatStat || odscr->m_fMuscleStat != ndscr.m_fMuscleStat;
+        ms_geometryHasChanged = ms_ratiosHaveChanged || !rng::equal(ndscr.m_anModelKeys, odscr->m_anModelKeys);
+        ms_textureHasChanged  = !rng::equal(ndscr.m_anTextureKeys, odscr->m_anTextureKeys);
         if (!ms_ratiosHaveChanged && !ms_geometryHasChanged && !ms_textureHasChanged) {
             return nullptr;
         }
