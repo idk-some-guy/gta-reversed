@@ -641,6 +641,7 @@ RpClump* CClothesBuilder::CreateSkinnedClump(RpClump* bones, RwTexDictionary* di
     // Free memory
     {
         RpGeometryDestroy(tmpGeo);
+        RpGeometrySetFlags(tmpGeo, RpGeometryGetFlags(tmpGeo) | rpGEOMETRYPOSITIONS); // The atomic still holds a reference to `tmpGeo`
 
         RwTexDictionarySetCurrent(dict);
         for (auto i = 0; i < NO_BODY_PARTS; i++) {
